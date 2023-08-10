@@ -1,0 +1,124 @@
+---
+title: "New York Shooting Data Analysis"
+author: "Jochen Schmitt"
+date: "2023-07-16"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+```
+
+## Import the NYPD Shooting Incident Data (Historic)
+
+I will start by reading in the data and creating a ny_shooting_data data frame. The data comes from the city of New York website. The data includes information on shooting occurrences specifying the boro, the date that the incident occurred as well as information on the age group, race and sex. This document focuses on the number of shooting cases and deaths especially in the time after January 2022. One Analysis will focus on the entire city of New York while the second part of the analysis will look at the Bronx.
+
+```{r get_shooting_data, message = FALSE}
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+ny_shooting_data <- read_csv(url_in)
+```
+
+## Tidy the Dataset by removing unwanted data
+
+After looking at ny_shooting_data , I would like to tidy the dataset and remove all columns that are not needed for my data analysis (INCIDENT_KEY, LOC_OF_OCCUR_DESC, OCCUR_TIME, JURISDICTION_CODE, LOC_CLASSFCTN_DESC,LOCATION_DESC, PERP_AGE_GROUP, PERP_SEX, PERP_RACE,X_COORD_CD, Y_COORD_CD, Latitude, Longitude, Lon_Lat). I also want to focus on the victims details and not on the perpetrator so I am removing data related to perpetrators as well. I am also converting the OCCUR_DATE from chr to a date data type and the STATISTICAL_MURDER_FLAG to an integer
+
+```{r tidy_global_data, message = FALSE}
+ny_shooting_data <- ny_shooting_data %>%
+  select(-c(INCIDENT_KEY, LOC_OF_OCCUR_DESC, OCCUR_TIME, JURISDICTION_CODE, 
+            LOC_CLASSFCTN_DESC, LOCATION_DESC, PERP_AGE_GROUP, PERP_SEX, 
+            PERP_RACE,X_COORD_CD, Y_COORD_CD, Latitude, Longitude, Lon_Lat)) %>%
+  mutate(OCCUR_DATE = mdy(OCCUR_DATE), 
+         STATISTICAL_MURDER_FLAG = as.integer(STATISTICAL_MURDER_FLAG),
+         Cases = 1) %>%
+  rename(Deaths=STATISTICAL_MURDER_FLAG)
+summary(ny_shooting_data)
+```
+
+## Create a new data set that displays cases and deaths for all of New York
+
+In this step I select the Date, Cases and Deaths for the city of New York, group this data by date and sum up the cases and deaths columns to get a row for each date with it's total number of cases and deaths for this date.
+
+```{r new_york_data, message = FALSE}
+new_york_cases <- ny_shooting_data %>% 
+  select(OCCUR_DATE, Cases, Deaths)
+new_york_cases <- new_york_cases %>%
+  group_by(OCCUR_DATE) %>%
+  summarise_if(is.numeric, sum, na.rm = TRUE) %>%   
+  distinct()
+```
+
+## Create a plot and plot Shooting cases against deaths for New York
+
+In this part of the document I am plotting the shooting cases against the deaths that occurred on or after 01/01/2022.
+
+```{r plot_new_york_data, message = FALSE}
+new_york_cases %>%
+  filter(Cases > 0, OCCUR_DATE >= '2022-01-01') %>%
+  ggplot(aes(x = OCCUR_DATE, y = Cases)) + 
+  geom_line(aes(color = "Cases")) + 
+  geom_point(aes(color = 'Cases')) + 
+  geom_line(aes(y = Deaths, color = "Deaths")) + 
+  geom_point(aes(y = Deaths, color = "Deaths")) +
+  scale_y_log10() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "Shooting incedents in New York since 01/2022", y = NULL)
+```
+
+## Create a new data set that displays cases and deaths for the Bronx
+
+In this step I select the Date, Cases and Deaths for the Bronx, group this data by date and sum up the cases and deaths columns to get a row for each date with it's total number of cases and deaths for this date.
+
+```{r bronx_data, message = FALSE}
+bronx_cases <- ny_shooting_data %>% 
+  filter(BORO == "BRONX") %>% 
+  select(OCCUR_DATE, Cases, Deaths)
+bronx_cases <- bronx_cases %>%
+  group_by(OCCUR_DATE) %>%
+  summarise_if(is.numeric, sum, na.rm = TRUE) %>%   
+  distinct()
+```
+
+## Create a plot and plot Shooting cases against deaths for the Bronx
+
+In this part of the document I am plotting the shooting cases against the deaths that occurred on or after 01/01/2022.
+```{r plot_bronx_data, message = FALSE}
+bronx_cases %>%
+  filter(Cases > 0, OCCUR_DATE >= '2022-01-01') %>%
+  ggplot(aes(x = OCCUR_DATE, y = Cases)) + 
+  geom_line(aes(color = "Cases")) + 
+  geom_point(aes(color = 'Cases')) + 
+  geom_line(aes(y = Deaths, color = "Deaths")) + 
+  geom_point(aes(y = Deaths, color = "Deaths")) +
+  scale_y_log10() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "Shooting incedents in the Bronx since 01/2022", y = NULL)
+```
+
+## Add a model to predict the deaths as a function of cases
+
+In this part of the analysis I am creating a linear model to see if the model can predict the deaths from shootings when given the number of cases involving a shooting. I am also showing the dates with the minimum and maxium number of cases by date.
+```{r modeling_data, message = FALSE}
+mod <- lm(Deaths ~ Cases, data = bronx_cases)
+bronx_cases %>% slice_min(Cases)
+bronx_cases %>% slice_max(Cases)
+bronx_cases <- bronx_cases %>% mutate(pred = predict(mod))
+bronx_cases %>% ggplot() +
+  geom_point(aes(x = Cases, y = Deaths), color="blue") + 
+  geom_point(aes(x = Cases, y = pred), color="red")
+```
+The model does not look like a good predictor of Cases versus deaths. In many cases the actual death per cases of shootings are off. So a linear model is not very useful in predicting the number of deaths per shooting case.
+
+
+## Sources of Bias
+
+In my opinion there are many sources of bias that can occur in an analysis like this. Biases that can occur could be that a Data Scientists might focus on parts of the city that might have higher crime rates than other parts of the city. Another bias could happened if race, age etc is added to the analysis. In order to avoid those kind of biases I removed those data points from the data sets that I analyzed.
+The one source of bias that I can identify in my data analysis is that I did look at shooting cases and death in the Bronx in more detail. I have to admit that the Bronx sounds like a more dangerous part of the city to me than for example Manhattan therefore I added bias by looking into sharing data that is more focused on the Bronx instead of also looking at other parts of the city in more detail.
+
+## Conclusion
+In conclusion, this R document analyzes a small part of the shooting data. It mainly focuses on the cases/deaths from shooting incidents in the city of New York and goes into more detail by looking at the Boro of the Bronx. It does not analyze the data in more depth by for example looking at which age groups, race and sex are most affected by shootings. In my opinion there could be some useful data points to look at in order to help reduce shooting cases in areas that are most affected by it. 
